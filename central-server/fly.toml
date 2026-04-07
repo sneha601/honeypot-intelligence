@@ -1,0 +1,26 @@
+# Fly.io config for the Central Intelligence Server
+# Deploy with: fly launch --config fly.toml  (first time)
+#              fly deploy                     (updates)
+
+app = "honeynet-central"       # Change this to a unique name
+primary_region = "sin"         # Singapore — free tier, good coverage
+
+[build]
+
+[env]
+  DB_PATH = "/data/honeypot.db"
+
+[mounts]
+  source      = "honeynet_data"
+  destination = "/data"
+
+[http_service]
+  internal_port        = 8000
+  force_https          = false
+  auto_stop_machines   = false
+  auto_start_machines  = true
+  min_machines_running = 1
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"

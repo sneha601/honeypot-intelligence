@@ -1,0 +1,59 @@
+# Fly.io config for the Honeypot Node
+# Deploy with: fly launch --config fly.toml  (first time)
+#              fly deploy                     (updates)
+#
+# IMPORTANT: Set CENTRAL_SERVER secret before deploying:
+#   fly secrets set CENTRAL_SERVER=https://honeynet-central.fly.dev
+
+app = "honeynet-node-01"       # Change this to a unique name
+primary_region = "sin"         # Use a different region than central server for diversity
+
+[build]
+
+[env]
+  NODE_ID     = "node-sin-01"
+  SSH_PORT    = "2222"
+  FTP_PORT    = "2121"
+  HTTP_PORT   = "8080"
+  TELNET_PORT = "2323"
+
+# ── SSH (port 22) ─────────────────────────────────────────────────────────────
+[[services]]
+  internal_port = 2222
+  protocol      = "tcp"
+
+  [[services.ports]]
+    port = 22
+
+  [[services.tcp_checks]]
+    interval    = "15s"
+    timeout     = "2s"
+    grace_period = "5s"
+
+# ── Telnet (port 23) — Mirai primary target ───────────────────────────────────
+[[services]]
+  internal_port = 2323
+  protocol      = "tcp"
+
+  [[services.ports]]
+    port = 23
+
+# ── FTP (port 21) ─────────────────────────────────────────────────────────────
+[[services]]
+  internal_port = 2121
+  protocol      = "tcp"
+
+  [[services.ports]]
+    port = 21
+
+# ── HTTP (port 80) ────────────────────────────────────────────────────────────
+[[services]]
+  internal_port = 8080
+  protocol      = "tcp"
+
+  [[services.ports]]
+    port = 80
+
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "256mb"

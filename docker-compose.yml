@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+
+  # ── Central Intelligence Server ─────────────────────────────────────────────
+  central-server:
+    build:
+      context: .
+      dockerfile: central-server/Dockerfile
+    container_name: honeynet-central
+    ports:
+      - "8000:8000"       # Dashboard + API
+    volumes:
+      - ./data:/app/data  # Persistent SQLite DB
+    environment:
+      - DB_PATH=/app/data/honeypot.db
+    restart: unless-stopped
+    networks:
+      - honeynet
+
+  # ── Honeypot Node (local) ───────────────────────────────────────────────────
+  honeypot-node:
+    build:
+      context: honeypot-node
+      dockerfile: Dockerfile
+    container_name: honeynet-node-local
+    ports:
+      - "22:2222"         # SSH  (maps public port 22 → internal 2222)
+      - "21:2121"         # FTP
+      - "80:8080"         # HTTP
+      - "23:2323"         # Telnet (Mirai botnet primary target)
+    environment:
+      - NODE_ID=node-local-01
+      - CENTRAL_SERVER=http://central-server:8000
+      - SSH_PORT=2222
+      - FTP_PORT=2121
+      - HTTP_PORT=8080
+      - TELNET_PORT=2323
+    depends_on:
+      - central-server
+    restart: unless-stopped
+    networks:
+      - honeynet
+
+  # ── Extra Node (simulate second geographic location) ────────────────────────
+  # Uncomment and deploy on a second VPS with CENTRAL_SERVER pointing to your main server
+  # honeypot-node-2:
+  #   build:
+  #     context: honeypot-node
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     - NODE_ID=node-eu-west-01
+  #     - CENTRAL_SERVER=http://<YOUR_CENTRAL_SERVER_IP>:8000
+  #   ports:
+  #     - "22:2222"
+  #     - "21:2121"
+  #     - "80:8080"
+  #   restart: unless-stopped
+
+networks:
+  honeynet:
+    driver: bridge
+
+volumes:
+  data:

@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Honeypot Intelligence Network</title>
+
+<!-- Leaflet (map) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --panel: #111827;
+    --border: #1f2937;
+    --accent: #00d4ff;
+    --red: #ff4757;
+    --green: #2ed573;
+    --yellow: #ffa502;
+    --orange: #ff6348;
+    --text: #e2e8f0;
+    --muted: #6b7280;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; font-size: 13px; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 18px; color: var(--accent); letter-spacing: 2px; }
+  #status { display: flex; align-items: center; gap: 8px; }
+  #status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  #status-dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px; padding: 12px;
+  }
+  .stat-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; text-align: center;
+  }
+  .stat-card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .stat-card .value { font-size: 28px; font-weight: bold; color: var(--accent); }
+
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 12px; padding: 0 12px 12px;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; overflow: hidden;
+  }
+  .panel-header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px;
+  }
+
+  #map { height: 380px; }
+
+  .bottom-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px; padding: 0 12px 12px;
+  }
+
+  /* Charts */
+  .chart-wrap { padding: 12px; height: 200px; position: relative; }
+
+  /* Event feed */
+  #event-feed { height: 380px; overflow-y: auto; }
+  .event-item {
+    padding: 8px 14px; border-bottom: 1px solid var(--border);
+    display: grid; grid-template-columns: 80px 1fr auto;
+    gap: 8px; align-items: center; font-size: 12px;
+    transition: background .2s;
+  }
+  .event-item:hover { background: rgba(255,255,255,.03); }
+  .event-item .svc {
+    padding: 2px 6px; border-radius: 4px; font-size: 10px;
+    font-weight: bold; text-align: center; text-transform: uppercase;
+  }
+  .svc.ssh   { background: #1e3a5f; color: #60a5fa; }
+  .svc.http  { background: #1a2e1a; color: var(--green); }
+  .svc.ftp   { background: #2d1b1b; color: var(--red); }
+  .svc.telnet{ background: #2d2a1b; color: var(--yellow); }
+  .event-item .ip { color: var(--accent); cursor: pointer; }
+  .event-item .ip:hover { text-decoration: underline; }
+  .threat { font-size: 10px; padding: 2px 5px; border-radius: 3px; white-space: nowrap; }
+  .threat.low      { background: #1f2937; color: var(--muted); }
+  .threat.medium   { background: #422006; color: var(--yellow); }
+  .threat.high     { background: #3b0f0f; color: var(--orange); }
+  .threat.critical { background: #4c0519; color: var(--red); }
+
+  /* Top attackers */
+  #attacker-list { max-height: 380px; overflow-y: auto; }
+  .attacker-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12px;
+  }
+  .attacker-row .flag { font-size: 18px; margin-right: 6px; }
+  .attacker-row .ip { color: var(--accent); }
+  .attacker-row .cnt { color: var(--red); font-weight: bold; }
+
+  /* IOC feed */
+  #ioc-list { max-height: 200px; overflow-y: auto; padding: 8px; }
+  .ioc-item { font-size: 11px; padding: 4px 6px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+  .ioc-item .ioc-type { color: var(--yellow); width: 40px; flex-shrink: 0; }
+  .ioc-item .ioc-val  { color: var(--text); word-break: break-all; }
+  .ioc-item .ioc-conf { color: var(--muted); flex-shrink: 0; }
+
+  /* Tag chips */
+  .tags { display: flex; flex-wrap: wrap; gap: 3px; }
+  .tag { background: #1f2937; color: var(--muted); font-size: 9px; padding: 1px 5px; border-radius: 3px; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#x1F36F; HONEYPOT INTELLIGENCE NETWORK</h1>
+  <div id="status">
+    <div id="status-dot"></div>
+    <span id="status-text">Connecting...</span>
+    <span style="color:var(--muted);margin-left:16px;" id="last-update"></span>
+  </div>
+</header>
+
+<!-- Stat cards -->
+<div class="grid">
+  <div class="stat-card">
+    <div class="label">Total Events</div>
+    <div class="value" id="stat-events">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Unique Attackers</div>
+    <div class="value" id="stat-ips">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">IOCs Generated</div>
+    <div class="value" id="stat-iocs">0</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Active Nodes</div>
+    <div class="value" id="stat-nodes">0</div>
+  </div>
+</div>
+
+<!-- Map + Event Feed -->
+<div class="main-grid">
+  <div class="panel">
+    <div class="panel-header">&#x1F5FA; Live Attack Map</div>
+    <div id="map"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">&#x26A1; Live Event Feed</div>
+    <div id="event-feed"></div>
+  </div>
+</div>
+
+<!-- Charts + Attackers + IOCs -->
+<div class="bottom-grid">
+  <div class="panel">
+    <div class="panel-header">Attacks by Service</div>
+    <div class="chart-wrap"><canvas id="service-chart"></canvas></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">&#x1F3AF; Top Attackers</div>
+    <div id="attacker-list"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-header">&#x26D4; IOC Feed <a href="/api/export/blocklist" style="float:right;color:var(--accent);font-size:10px;text-decoration:none;">Export Blocklist</a></div>
+    <div id="ioc-list"></div>
+  </div>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+const WS_URL = `ws://${location.host}/ws`;
+const API    = `${location.protocol}//${location.host}/api`;
+
+// ── Map ─────────────────────────────────────────────────────────────────────
+const map = L.map("map", { zoomControl: false, attributionControl: false })
+              .setView([20, 0], 2);
+
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  maxZoom: 19,
+}).addTo(map);
+
+const markerLayer = L.layerGroup().addTo(map);
+const markerIndex = {};  // ip → marker
+
+function addMapMarker(ip, lat, lon, country, city, cnt) {
+  if (!lat || !lon || (lat === 0 && lon === 0)) return;
+  const key = ip;
+  const radius = Math.min(4 + Math.log2(cnt || 1) * 3, 20);
+  if (markerIndex[key]) {
+    markerIndex[key].setRadius(radius);
+    return;
+  }
+  const circle = L.circleMarker([lat, lon], {
+    radius, color: "#ff4757", fillColor: "#ff4757",
+    fillOpacity: 0.6, weight: 1,
+  }).bindPopup(`<b>${ip}</b><br>${city}, ${country}<br>Hits: ${cnt}`);
+  circle.addTo(markerLayer);
+  markerIndex[key] = circle;
+}
+
+// Pulse animation for new attack
+function pulseMarker(lat, lon) {
+  if (!lat || !lon || (lat === 0 && lon === 0)) return;
+  const pulse = L.circleMarker([lat, lon], {
+    radius: 4, color: "#00d4ff", fillColor: "#00d4ff", fillOpacity: 1, weight: 2,
+  }).addTo(map);
+  let r = 4, growing = true;
+  const id = setInterval(() => {
+    if (growing) { r += 2; if (r >= 24) growing = false; }
+    else         { r -= 2; if (r <= 0) { clearInterval(id); map.removeLayer(pulse); return; } }
+    pulse.setRadius(r);
+    pulse.setStyle({ fillOpacity: r / 24 * 0.8 });
+  }, 30);
+}
+
+// ── Charts ──────────────────────────────────────────────────────────────────
+const serviceCtx = document.getElementById("service-chart").getContext("2d");
+const serviceChart = new Chart(serviceCtx, {
+  type: "doughnut",
+  data: {
+    labels: [],
+    datasets: [{ data: [], backgroundColor: ["#60a5fa","#2ed573","#ff4757","#ffa502","#a78bfa"], borderWidth: 0 }]
+  },
+  options: {
+    plugins: { legend: { labels: { color: "#e2e8f0", font: { size: 11 } } } },
+    responsive: true, maintainAspectRatio: false,
+  }
+});
+
+function updateServiceChart(byService) {
+  serviceChart.data.labels = Object.keys(byService);
+  serviceChart.data.datasets[0].data = Object.values(byService);
+  serviceChart.update("none");
+}
+
+// ── Event Feed ───────────────────────────────────────────────────────────────
+const feed = document.getElementById("event-feed");
+const MAX_FEED = 200;
+
+function addEventToFeed(ev, geo, threat) {
+  const item = document.createElement("div");
+  item.className = "event-item";
+  const svc = ev.service || "?";
+  const level = threat?.threat_level || "low";
+  const tags = (threat?.tags || []).slice(0, 3);
+
+  item.innerHTML = `
+    <span class="svc ${svc}">${svc.toUpperCase()}</span>
+    <span>
+      <span class="ip" onclick="lookupIP('${ev.attacker_ip}')">${ev.attacker_ip}</span>
+      <span style="color:var(--muted)"> → ${ev.event_type.replace(/_/g," ")}</span>
+      <div class="tags">${tags.map(t=>`<span class="tag">${t}</span>`).join("")}</div>
+    </span>
+    <span class="threat ${level}">${level}</span>
+  `;
+
+  feed.prepend(item);
+  while (feed.children.length > MAX_FEED) feed.removeChild(feed.lastChild);
+}
+
+// ── Top Attackers ─────────────────────────────────────────────────────────────
+function renderAttackers(attackers) {
+  const el = document.getElementById("attacker-list");
+  el.innerHTML = attackers.map(a => `
+    <div class="attacker-row">
+      <span><span class="flag">${countryFlag(a.country_code)}</span>
+            <span class="ip">${a.attacker_ip}</span>
+            <span style="color:var(--muted);margin-left:6px;font-size:10px">${a.city || a.country || ""}</span>
+      </span>
+      <span class="cnt">${a.hit_count}</span>
+    </div>
+  `).join("");
+}
+
+function countryFlag(code) {
+  if (!code || code === "XX") return "🌐";
+  return code.toUpperCase().replace(/./g, c => String.fromCodePoint(c.charCodeAt(0) + 127397));
+}
+
+// ── IOC Feed ──────────────────────────────────────────────────────────────────
+function renderIOCs(iocs) {
+  const el = document.getElementById("ioc-list");
+  el.innerHTML = iocs.slice(0, 50).map(ioc => `
+    <div class="ioc-item">
+      <span class="ioc-type">${ioc.ioc_type}</span>
+      <span class="ioc-val">${ioc.value}</span>
+      <span class="ioc-conf">${Math.round(ioc.confidence * 100)}%</span>
+    </div>
+  `).join("");
+}
+
+// ── Stat helpers ──────────────────────────────────────────────────────────────
+function updateStats(stats) {
+  document.getElementById("stat-events").textContent = stats.total_events.toLocaleString();
+  document.getElementById("stat-ips").textContent    = stats.unique_ips.toLocaleString();
+  document.getElementById("stat-iocs").textContent   = stats.total_iocs.toLocaleString();
+  document.getElementById("stat-nodes").textContent  = stats.unique_nodes.toLocaleString();
+  if (stats.events_by_service) updateServiceChart(stats.events_by_service);
+}
+
+function lookupIP(ip) {
+  window.open(`https://www.abuseipdb.com/check/${ip}`, "_blank");
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+let ws, reconnectTimer;
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    document.getElementById("status-dot").classList.add("live");
+    document.getElementById("status-text").textContent = "LIVE";
+    clearTimeout(reconnectTimer);
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    document.getElementById("last-update").textContent =
+      "Last: " + new Date().toLocaleTimeString();
+
+    if (msg.type === "init") {
+      const d = msg.data;
+      updateStats(d.stats);
+      renderAttackers(d.top_attackers || []);
+      // Seed map
+      (d.map_data || []).forEach(p => addMapMarker(p.attacker_ip, p.lat, p.lon, p.country, p.city, p.cnt));
+      // Seed feed
+      (d.recent_events || []).reverse().forEach(ev => addEventToFeed(ev, null, { threat_level: "low", tags: [] }));
+      // Seed IOCs
+      fetch(`${API}/iocs`).then(r=>r.json()).then(renderIOCs);
+
+    } else if (msg.type === "event") {
+      const { event, geo, threat } = msg.data;
+      // Map pulse
+      if (geo) {
+        addMapMarker(event.attacker_ip, geo.lat, geo.lon, geo.country, geo.city, 1);
+        pulseMarker(geo.lat, geo.lon);
+      }
+      addEventToFeed(event, geo, threat);
+      // Refresh stats + attackers periodically
+      fetch(`${API}/stats`).then(r=>r.json()).then(updateStats);
+      if (Math.random() < 0.1) {
+        fetch(`${API}/top-attackers`).then(r=>r.json()).then(renderAttackers);
+        fetch(`${API}/iocs`).then(r=>r.json()).then(renderIOCs);
+      }
+    }
+  };
+
+  ws.onclose = () => {
+    document.getElementById("status-dot").classList.remove("live");
+    document.getElementById("status-text").textContent = "Reconnecting...";
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+// Heartbeat to keep WS alive
+setInterval(() => { if (ws?.readyState === WebSocket.OPEN) ws.send("ping"); }, 20000);
+
+connect();
+</script>
+</body>
+</html>
