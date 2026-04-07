@@ -322,64 +322,46 @@ function lookupIP(ip) {
   window.open(`https://www.abuseipdb.com/check/${ip}`, "_blank");
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────────────────
-let ws, reconnectTimer;
+// ── Poll-based live updates (works on Render free tier) ───────────────────────
+let lastEventId = 0;
 
-function connect() {
-  ws = new WebSocket(WS_URL);
+async function loadAll() {
+  try {
+    const [stats, attackers, events, iocs, mapData] = await Promise.all([
+      fetch(`${API}/stats`).then(r => r.json()),
+      fetch(`${API}/top-attackers`).then(r => r.json()),
+      fetch(`${API}/events?limit=50`).then(r => r.json()),
+      fetch(`${API}/iocs`).then(r => r.json()),
+      fetch(`${API}/map`).then(r => r.json()),
+    ]);
 
-  ws.onopen = () => {
+    updateStats(stats);
+    renderAttackers(attackers);
+    renderIOCs(iocs);
+    mapData.forEach(p => addMapMarker(p.attacker_ip, p.lat, p.lon, p.country, p.city, p.cnt));
+
+    // Add new events to feed
+    const newEvents = events.filter(e => e.id > lastEventId);
+    if (newEvents.length > 0) {
+      lastEventId = events[0].id;
+      newEvents.forEach(ev => {
+        addEventToFeed(ev, null, { threat_level: "low", tags: [] });
+        if (ev.lat && ev.lon) pulseMarker(ev.lat, ev.lon);
+      });
+    }
+
     document.getElementById("status-dot").classList.add("live");
     document.getElementById("status-text").textContent = "LIVE";
-    clearTimeout(reconnectTimer);
-  };
-
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    document.getElementById("last-update").textContent =
-      "Last: " + new Date().toLocaleTimeString();
-
-    if (msg.type === "init") {
-      const d = msg.data;
-      updateStats(d.stats);
-      renderAttackers(d.top_attackers || []);
-      // Seed map
-      (d.map_data || []).forEach(p => addMapMarker(p.attacker_ip, p.lat, p.lon, p.country, p.city, p.cnt));
-      // Seed feed
-      (d.recent_events || []).reverse().forEach(ev => addEventToFeed(ev, null, { threat_level: "low", tags: [] }));
-      // Seed IOCs
-      fetch(`${API}/iocs`).then(r=>r.json()).then(renderIOCs);
-
-    } else if (msg.type === "event") {
-      const { event, geo, threat } = msg.data;
-      // Map pulse
-      if (geo) {
-        addMapMarker(event.attacker_ip, geo.lat, geo.lon, geo.country, geo.city, 1);
-        pulseMarker(geo.lat, geo.lon);
-      }
-      addEventToFeed(event, geo, threat);
-      // Refresh stats + attackers periodically
-      fetch(`${API}/stats`).then(r=>r.json()).then(updateStats);
-      if (Math.random() < 0.1) {
-        fetch(`${API}/top-attackers`).then(r=>r.json()).then(renderAttackers);
-        fetch(`${API}/iocs`).then(r=>r.json()).then(renderIOCs);
-      }
-    }
-  };
-
-  ws.onclose = () => {
+    document.getElementById("last-update").textContent = "Last: " + new Date().toLocaleTimeString();
+  } catch(e) {
     document.getElementById("status-dot").classList.remove("live");
     document.getElementById("status-text").textContent = "Reconnecting...";
-    reconnectTimer = setTimeout(connect, 3000);
-  };
-
-  ws.onerror = () => ws.close();
+  }
 }
 
-// Heartbeat to keep WS alive
-setInterval(() => { if (ws?.readyState === WebSocket.OPEN) ws.send("ping"); }, 20000);
-
-connect();
+// Load immediately then poll every 5 seconds
+loadAll();
+setInterval(loadAll, 5000);
 </script>
 </body>
 </html>
